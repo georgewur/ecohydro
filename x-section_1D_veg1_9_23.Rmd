@@ -11,8 +11,7 @@ library(FVFE1D)
 
 # The location of the cross section
 
-The cross section start at the North Sea side continuing over the dune towards the polders in the direction of the village den Burg. ![Cross section West-East](x-sectionW-E.png) 
-The length of the model is about 3 km and the depth extends from the surface till 15m below MSL in depth where one can find a clay deposit of the Drente/Gieten formation and is assumed impermeable. The elevations at the surface are based on AHN.
+The cross section start at the North Sea side continuing over the dune towards the polders in the direction of the village den Burg. ![Cross section West-East](x-sectionW-E.png) The length of the model is about 3 km and the depth extends from the surface till 15m below MSL in depth where one can find a clay deposit of the Drente/Gieten formation and is assumed impermeable. The elevations at the surface are based on AHN.
 
 ```{r}
 #loading elevation data from AHN
@@ -75,9 +74,7 @@ plot(Tex.stat,fluxplot = T)
 # Adding the drainage system to the model
 
 The cross section contains dunes and polders. Only in the polders a drainage sytems (mainly ditches) is present and start 1400 m inland from the North Sea side. The drain depth in the polders is -0.75 m NAP.\
-The dune area will have the elevation as "drain depth". This ensures that when storm events occur and water levels rise above the surface this water will be discharged from the model (runoff).
-The drainage resistance is based on the local drainage system of the polders (Cdrain = 100 days) and the vertical resistance of the soil when there is runoff is 10 days (Crunoff)
-
+The dune area will have the elevation as "drain depth". This ensures that when storm events occur and water levels rise above the surface this water will be discharged from the model (runoff). The drainage resistance is based on the local drainage system of the polders (Cdrain = 100 days) and the vertical resistance of the soil when there is runoff is 10 days (Crunoff)
 
 ```{r}
 drain.nodes = nodes[nodes >1400]
@@ -549,19 +546,31 @@ Based on the actual transpiration and evaporation a new partitioning can be dete
 
     1.  calculate potential transpiration based on current $ET_p(t)$ and vegetation fraction $f_i(x)$
 
+        1.  `Calc.Tpi = function(ETp,fi)`
+
     2.  calculate $\frac{Ta_i}{Tp_i}$ for this vegetation type
 
-    3.  return $Ta_i$ to the model
+        1.  `Calc.Tai.Tpi = function(Tpi,z,ai,zi)` which returns the fraction (between 0 and 1) $\frac{Ta_i}{Tp_i}$
+
+    3.  return $Ta_i$ to the model as a spatial Cauchy type boundary condition
+
+        1.  `calc.Tai.f1 = function(x,state)` for vegetation type 1
+
+        2.  `add.spatialflux(Tex.veg,rate = calc.Tai.f1, name = "vegetation1")`
 
 4.  Spatial flux for bare soil
 
     1.  calculate potential evaporation based on $Ep=ET_p - \sum_{i=1}^{n} Tp_i$
 
-    2.  calculate $Ea$
+    2.  calculate $Ea = \frac{Ep}{1+(\frac{z}{z_E})^{a_E}}$
 
-    3.  return $Ea$ to the model
+        1.  `calc.Ea.f0 = function(x,state)`
 
-5.  Run the model with the current vegetation and bare soil flux
+    3.  return $Ea$ to the model as a spatial Cauchy type boundary condition
+
+        1.  `add.spatialflux(Tex.veg, rate = calc.Ea.f0, name = "soil")`
+
+5.  Run the model with the current vegetation types and bare soil flux
 
 6.  Calculate $( \frac{\Delta f_i}{\Delta t})^{(t+\Delta t)}= (\frac{Ta_i}{Tp_i})^{t+\Delta t}f_i^tf_0^t-d_if_i^t$ for all fractions
 
@@ -639,17 +648,25 @@ Calc.Tpi = function(ETp,fi)
   return((ETp + 0.0000001) * fi)
 }
 
-Calc.Tai.Tpi = function(Tpi,z,ai,zi)
+# Calc.Tai.Tpi = function(Tpi,z,ai,zi)
+# {
+#   if (Tpi > 0.0)
+#   {
+#     bi = 4*ai^2/(ai^2-1)*((ai-1)/(ai+1))^(1/ai)
+#     Tai.Tpi = bi* (z/zi)^(ai-1)/(1+(z/zi)^ai)^2
+#    # cat(paste("bi: ",bi," Tai : ", Tai), "\n")
+#     return(Tai.Tpi)
+#     #in the report it states Tai/Tpi = bi* (z/zi)^(ai-1)/(1+(z/zi)^ai)^2
+#   }else(return(0))
+# }
+
+Calc.Tai.Tpi = function(z,ai,zi)
 {
-  if (Tpi > 0.0)
-  {
     bi = 4*ai^2/(ai^2-1)*((ai-1)/(ai+1))^(1/ai)
     Tai.Tpi = bi* (z/zi)^(ai-1)/(1+(z/zi)^ai)^2
-   # cat(paste("bi: ",bi," Tai : ", Tai), "\n")
-    return(Tai.Tpi)
-    #in the report it states Tai/Tpi = bi* (z/zi)^(ai-1)/(1+(z/zi)^ai)^2
-  }else(return(0))
+return(Tai.Tpi)  
 }
+
 
 Calc.dfi.dt = function(Tai.Tpi,fi.old,f0.old,di)
 {
@@ -684,10 +701,10 @@ Ea.f0.fun = approxfun(nodes, Ea.f0)
 
 calc.Tai.f1 = function(x,state)
 {
-  f1 = f1.fun(x) #fetch the current f1 for the current node at x
-  Tpi.f1  = Calc.Tpi(evaptrns,f1) #to have a global Tpi.f2
-  #calculate Tai.Tpi(t+1) with current Tpi(t)
-  Tai.Tpi.f1 = Calc.Tai.Tpi(Tpi.f1,max(0,(ahn2.fun(x)-state))*1000,f1.ai,f1.zi)
+  f1 = f1.fun(x) 
+  Tpi.f1 <<- Calc.Tpi(evaptrns,f1) 
+ # Tai.Tpi.f1 = Calc.Tai.Tpi(Tpi.f1,max(0,(ahn2.fun(x)-state))*1000,f1.ai,f1.zi)
+   Tai.Tpi.f1 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f1.ai,f1.zi)
   Tai.f1 = Tai.Tpi.f1 * evaptrns
   return(-Tai.f1)
 }
@@ -696,9 +713,10 @@ calc.Tai.f1 = function(x,state)
 calc.Tai.f2 = function(x,state)
 {
   f2 = f2.fun(x)
-  Tpi.f2  = Calc.Tpi(evaptrns,f2) #to have a global Tpi.f2
-  #calculate Tai.Tpi(t+1) with current Tpi(t)
-  Tai.Tpi.f2 = Calc.Tai.Tpi(Tpi.f2,max(0,(ahn2.fun(x)-state))*1000,f2.ai,f2.zi)
+  Tpi.f2 <<- Calc.Tpi(evaptrns,f2) 
+  
+  #Tai.Tpi.f2 = Calc.Tai.Tpi(Tpi.f2,max(0,(ahn2.fun(x)-state))*1000,f2.ai,f2.zi)
+  Tai.Tpi.f2 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f2.ai,f2.zi)
   Tai.f2 = Tai.Tpi.f2 * evaptrns
   return(-Tai.f2)
 }
@@ -706,9 +724,9 @@ calc.Tai.f2 = function(x,state)
 calc.Tai.f3 = function(x,state)
 {
   f3 = f3.fun(x)
-  Tpi.f3  = Calc.Tpi(evaptrns,f3) #to have a global Tpi.f2
-  #calculate Tai.Tpi(t+1) with current Tpi(t)
-  Tai.Tpi.f3 = Calc.Tai.Tpi(Tpi.f3,max(0,(ahn2.fun(x)-state))*1000,f3.ai,f3.zi)
+  Tpi.f3  <<- Calc.Tpi(evaptrns,f3)
+  #Tai.Tpi.f3 = Calc.Tai.Tpi(Tpi.f3,max(0,(ahn2.fun(x)-state))*1000,f3.ai,f3.zi)
+  Tai.Tpi.f3 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f3.ai,f3.zi)
   Tai.f3 = Tai.Tpi.f3 * evaptrns
   return(-Tai.f3)
 }
@@ -716,9 +734,9 @@ calc.Tai.f3 = function(x,state)
 calc.Tai.f4 = function(x,state)
 {
   f4 = f4.fun(x)
-  Tpi.f4  = Calc.Tpi(evaptrns,f4) #to have a global Tpi.f2
-  #calculate Tai.Tpi(t+1) with current Tpi(t)
-  Tai.Tpi.f4 = Calc.Tai.Tpi(Tpi.f4,max(0,(ahn2.fun(x)-state))*1000,f4.ai,f4.zi)
+  Tpi.f4  <<- Calc.Tpi(evaptrns,f4) 
+ #  Tai.Tpi.f4 = Calc.Tai.Tpi(Tpi.f4,max(0,(ahn2.fun(x)-state))*1000,f4.ai,f4.zi)
+  Tai.Tpi.f4 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f4.ai,f4.zi)
   Tai.f4 = Tai.Tpi.f4 * evaptrns
   return(-Tai.f4)
 }
@@ -726,29 +744,29 @@ calc.Tai.f4 = function(x,state)
 calc.Tai.f5 = function(x,state)
 {
   f5 = f5.fun(x)
-  Tpi.f5  = Calc.Tpi(evaptrns,f5) #to have a global Tpi.f2
-  #calculate Tai.Tpi(t+1) with current Tpi(t)
-  Tai.Tpi.f5 = Calc.Tai.Tpi(Tpi.f5,max(0,(ahn2.fun(x)-state))*1000,f5.ai,f5.zi)
+  Tpi.f5 <<-  Calc.Tpi(evaptrns,f5) 
+  #  Tai.Tpi.f5 = Calc.Tai.Tpi(Tpi.f5,max(0,(ahn2.fun(x)-state))*1000,f5.ai,f5.zi)
+  Tai.Tpi.f5 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f5.ai,f5.zi)
   Tai.f5 = Tai.Tpi.f5 * evaptrns
   return(-Tai.f5)
 }
 
 
-Calc.Tai.f6 = function(x,state)
+calc.Tai.f6 = function(x,state)
 {
   f6 = f6.fun(x)
-  Tpi.f6 = Calc.Tpi(evaptrns,f6)
-  Tai.Tpi.f6 = Calc.Tai.Tpi(Tpi.f6,max(0,(ahn2.fun(x)-state))*1000,f6.ai,f6.zi)
+  Tpi.f6 <<- Calc.Tpi(evaptrns,f6)
+  #  Tai.Tpi.f6 = Calc.Tai.Tpi(Tpi.f6,max(0,(ahn2.fun(x)-state))*1000,f6.ai,f6.zi)
+  Tai.Tpi.f6 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f6.ai,f6.zi)
   Tai.f6 = Tai.Tpi.f6 * evaptrns
   return(-Tai.f6)
 }
 
 calc.Ea.f0 = function(x,state)
 {
-  Ea = Ea.f0.fun(x)
-  Ep = evaptrns - Ea
-#  Ea = Ep * 1/(1+max(0,(ahn2.fun(x)- state))*1000/f0.zE)^f0.aE
-    Ea = Ep * 1/(1+max(0,(ahn2.fun(x)-state))*1000/f0.zE)^f0.aE
+  #Ep = ETp - sum(Tpi.fi)
+  Ep = evaptrns - (Tpi.f1 + Tpi.f2 + Tpi.f3 + Tpi.f4 + Tpi.f5 + Tpi.f6)
+    Ea =  Ep/(1+max(0,(ahn2.fun(x)-state))*1000/f0.zE)^f0.aE
   return(-Ea)
 }
 
@@ -759,12 +777,12 @@ add.spatialflux(Tex.veg,rate = calc.Tai.f2, name = "vegetation2")
 add.spatialflux(Tex.veg,rate = calc.Tai.f3, name = "vegetation3")
 add.spatialflux(Tex.veg,rate = calc.Tai.f4, name = "vegetation4")
 add.spatialflux(Tex.veg,rate = calc.Tai.f5, name = "vegetation5")
-add.spatialflux(Tex.veg,rate = Calc.Tai.f6, name = "vegetation6")
+add.spatialflux(Tex.veg,rate = calc.Tai.f6, name = "vegetation6")
 add.spatialflux(Tex.veg, rate = calc.Ea.f0, name = "soil")
 
 
 begin.date = 20100331 #March 31 2010
-end.date  =  20120401 #365 #length(meteo$yearmonthday)
+end.date  =  20110330 #365 #length(meteo$yearmonthday)
 begin.day.nr = which(meteo$yearmonthday == begin.date)
 end.day.nr = which(meteo$yearmonthday == end.date)
 current.day = begin.day.nr
@@ -828,49 +846,55 @@ while (current.day < end.day.nr)
   wtable.set = c(wtable.set,wtable) #saving the water table data for some (Gt??) analysis
   #set up values to calculate the new fractions
   #fractions vegetation 1
-  Tpi.f1 = Calc.Tpi(-evaptrns,f1.fun(nodes))
+  #Tpi.f1 = Calc.Tpi(-evaptrns,f1.fun(nodes))
   Tai.f1 = df.external$vegetation1
-  df1.dt = Calc.dfi.dt(Tai.f1/Tpi.f1,f1,f0,f1.di)
+  TaiTpi.f1 = Calc.Tai.Tpi(wtable.fun(nodes),f1.ai,f1.zi)
+  df1.dt = Calc.dfi.dt(TaiTpi.f1,f1,f0,f1.di)
   f1 = f1.fun(nodes) + df1.dt
   f1.fun = approxfun(nodes,f1)
   f1.frac = rbind(f1.frac,f1)
   f1.set = c(f1.set,f1)
   #fractions vegetation 2
-  Tpi.f2 = Calc.Tpi(-evaptrns,f2.fun(nodes))
+  #Tpi.f2 = Calc.Tpi(-evaptrns,f2.fun(nodes))
   Tai.f2 = df.external$vegetation2
-  df2.dt = Calc.dfi.dt(Tai.f2/Tpi.f2,f2,f0,f2.di)
+  TaiTpi.f2 = Calc.Tai.Tpi(wtable.fun(nodes),f2.ai,f2.zi)
+  df2.dt = Calc.dfi.dt(TaiTpi.f2,f2,f0,f2.di)
   f2 = f2.fun(nodes) + df2.dt
   f2.fun = approxfun(nodes,f2)
   f2.frac = rbind(f2.frac,f2)
   f2.set = c(f2.set,f2)
   #fractions vegetation 3
-  Tpi.f3 = Calc.Tpi(-evaptrns,f3.fun(nodes))
+  #Tpi.f3 = Calc.Tpi(-evaptrns,f3.fun(nodes))
   Tai.f3 = df.external$vegetation3
-  df3.dt = Calc.dfi.dt(Tai.f3/Tpi.f3,f3,f0,f3.di)
+  TaiTpi.f3 = Calc.Tai.Tpi(wtable.fun(nodes),f3.ai,f3.zi)
+  df3.dt = Calc.dfi.dt(TaiTpi.f3,f3,f0,f3.di)
   f3 = f3.fun(nodes) + df3.dt
   f3.fun = approxfun(nodes,f3)
   f3.frac = rbind(f3.frac,f3)
   f3.set = c(f3.set,f3)
   #fractions vegetation 4
-  Tpi.f4 = Calc.Tpi(-evaptrns,f4.fun(nodes))
+  #Tpi.f4 = Calc.Tpi(-evaptrns,f4.fun(nodes))
   Tai.f4 = df.external$vegetation4
-  df4.dt = Calc.dfi.dt(Tai.f4/Tpi.f4,f4,f0,f4.di)
+  TaiTpi.f4 = Calc.Tai.Tpi(wtable.fun(nodes),f4.ai,f4.zi)
+  df4.dt = Calc.dfi.dt(TaiTpi.f4,f4,f0,f4.di)
   f4 = f4.fun(nodes) + df4.dt
   f4.fun = approxfun(nodes,f4)
   f4.frac = rbind(f4.frac,f4)
   f4.set = c(f4.set,f4)
   #fractions vegetation 5
-  Tpi.f5 = Calc.Tpi(-evaptrns,f5.fun(nodes))
+  #Tpi.f5 = Calc.Tpi(-evaptrns,f5.fun(nodes))
   Tai.f5 = df.external$vegetation5
-  df5.dt = Calc.dfi.dt(Tai.f5/Tpi.f5,f5,f0,f5.di)
+  TaiTpi.f5 = Calc.Tai.Tpi(wtable.fun(nodes),f5.ai,f5.zi)
+  df5.dt = Calc.dfi.dt(TaiTpi.f5,f5,f0,f5.di)
   f5 = f5.fun(nodes) + df5.dt
   f5.fun = approxfun(nodes,f5)
   f5.frac = rbind(f5.frac,f5)
   f5.set = c(f5.set,f5)
  #fractions vegetation 6
-  Tpi.f6 = Calc.Tpi(-evaptrns,f6.fun(nodes))
+  #Tpi.f6 = Calc.Tpi(-evaptrns,f6.fun(nodes))
   Tai.f6 = df.external$vegetation6
-  df6.dt = Calc.dfi.dt(Tai.f6/Tpi.f6,f6,f0,f6.di)
+  TaiTpi.f6 = Calc.Tai.Tpi(wtable.fun(nodes),f6.ai,f6.zi)
+  df6.dt = Calc.dfi.dt(TaiTpi.f6,f6,f0,f6.di)
   f6 = f6.fun(nodes) + df6.dt
   f6.fun = approxfun(nodes,f6)
   f6.frac = rbind(f6.frac,f6)
@@ -893,6 +917,7 @@ wb = data.frame(wb)
 #names(wb) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","soil","precip","bnd")
 names(wb) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","veg3","veg4","veg5","veg6","soil","precip","bnd")
 ```
+
 ### See how plotly works with this:
 
 ```{r}
@@ -924,8 +949,6 @@ nrdays = end.day.nr - begin.day.nr
 wspiegel = matrix(wtable.set,ncol = nrdays, byrow = F)
 plot(wspiegel[2,])
 ```
-
-
 
 ### Have a look at the data
 
@@ -961,4 +984,3 @@ save.image(file = "results.Rdata")
 
 
 ```
-

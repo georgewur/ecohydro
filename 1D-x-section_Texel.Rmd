@@ -1,0 +1,631 @@
+---
+title: "1D-x-section Texel "
+output: html_notebook
+author: G. Bier September 2023
+---
+
+```{r echo=FALSE}
+rm(list = ls())
+library(FVFE1D)
+source("support_functions.R")
+```
+
+# The location of the cross section
+
+The cross section start at the North Sea side continuing over the dune towards the polders in the direction of the village den Burg. ![Cross section West-East](x-sectionW-E.png).
+
+The length of the model is about 3 km and the depth extends from the surface till 15m below MSL in depth where one can find a clay deposit of the Drente/Gieten formation and is assumed impermeable. The elevations at the surface are based on AHN.
+
+```{r}
+#loading elevation data from AHN
+
+ahn2 = read.csv(file = "Elevation Profile Data_AHN2_W-E.csv",header = TRUE)
+domain = 1000*range(ahn2$Distance)
+#create a function of this profile because there are way to much point in this data
+#the csv file is in this is in km
+ahn2.fun = approxfun(1000*ahn2$Distance,ahn2$Elevation)
+#a plot of the elevations at every 10 m in the x-direction
+plot(rep(1:round(domain[2]/10))*10,ahn2.fun(rep(1:round(domain[2]/10))*10),type = "o",col = 'brown',lwd =2,xlab = "Elevation (m)",ylab = "Distance (m)",main="Elevation of the x-section")
+grid()
+```
+
+## Domain and nodes of the model
+
+The model extends from west to east for about 3 km. the depth at which the clayey layer limits the groundwater flow is -15m AMSL (NAP in Dutch) The nodal distance applied for the model is for now 50m but can be adjusted later on.
+
+```{r}
+nodes = seq(from = domain[1], to = domain[2], by = 50)
+flow.domain.x = c(0,max(nodes),rev(nodes))
+bot.domain = - 15
+flow.domain.y = c(bot.domain,bot.domain,ahn2.fun(rev(nodes)))
+plot(flow.domain.x,flow.domain.y, xlab = "Elevation (m)",ylab = "Distance (m)",main="Domain of the model")
+polygon(flow.domain.x,flow.domain.y, col = "lightblue", lwd = 2)
+grid()
+```
+
+# Saturated groundwater flow
+
+Flow here will be based on:
+
+$$
+Q = -kD(x)\frac{\partial H}{\partial x}
+$$
+
+```{r}
+k = 5 #m/d
+Darcy = function(x,state,gradstate)
+{
+  D = state - bot.domain #the saturated thickness of the model at this point
+  Q = -k*D*gradstate
+  return(Q)
+}
+```
+
+# Setting up the base stationary model without drainage system
+
+```{r}
+recharge = 0.001
+Tex.stat = newFLOW1D(domain = domain, systemfluxfunction = Darcy, name = "Stationary Texel 1D")
+set.BC.fixedstate(Tex.stat,where = "left", value = 0.0) # sea level 
+set.BC.fixedstate(Tex.stat,where = "right", value = -0.75)# approximate polder level
+add.spatialflux(Tex.stat,rate = "recharge",name = "Recharge")
+set.discretisation(Tex.stat,nodes=nodes, method = "FE")
+solve.steps(Tex.stat)
+plot(Tex.stat,fluxplot = T)
+```
+
+# Adding the drainage system to the model
+
+The cross section contains dunes and polders. Only in the polders a drainage sytems (mainly ditches) is present and start 1400 m inland from the North Sea side. The drain depth in the polders is -0.75 m NAP.\
+The dune area will have the elevation as "drain depth". This ensures that when storm events occur and water levels rise above the surface this water will be discharged from the model (runoff). The drainage resistance is based on the local drainage system of the polders (Cdrain = 100 days) and the vertical resistance of the soil when there is runoff is 10 days (Crunoff)
+
+```{r}
+drain.nodes = nodes[nodes >1400]
+dune.nodes = nodes[nodes <= 1400]
+drain.depth = ahn2.fun(drain.nodes) - 0.75
+dune.depth = ahn2.fun(dune.nodes)
+draindepth.fun = approxfun(x=c(dune.nodes,drain.nodes),y=c(dune.depth,drain.depth), rule = 2)
+
+range.drainage.depth = range(draindepth.fun(nodes))
+plot(nodes,ahn2.fun(nodes),type="l",lwd =2, col="green",
+     ylab= "Elevation (m)",xlab="Distance (m)",ylim = range.drainage.depth,
+     main = "Elevations (green) and drain depths (red)"  )
+lines(nodes,draindepth.fun(nodes),col = "red",lwd=2, lty = "dashed")
+grid()
+
+Cdrain = 100 #estimate based on drainage system at location
+Crunoff = 10 #estimate based on average soil thickness and average (saturated) hydraulic conductivity between grw.table and surface
+drain.fun = function(x,state)
+{
+  if(state > draindepth.fun(x))
+  { 
+    if (x > 1400)
+      return((draindepth.fun(x) - state)/Cdrain)
+    else
+      (return((draindepth.fun(x) - state)/Crunoff))
+  }else(return(0))
+}
+
+add.spatialflux(Tex.stat,rate = drain.fun, name = "Drainage")
+
+solve.steps(Tex.stat)
+plot(Tex.stat,fluxplot = T)
+plot.wtable(Tex.stat)
+ 
+dataframe.balance(Tex.stat)
+df.ext = dataframe.externalfluxes(Tex.stat)
+plot(df.ext$x,abs(df.ext$`S{Drainage}dx`), type = "o",col = "red",lwd = 2,
+     xlab = "Distance from North Sea (m)", ylab = "Flux rate (m2/d)")
+lines(df.ext$x,df.ext$`S{Recharge}dx`, col = "blue", lwd = 2)
+grid()
+```
+
+## Transient simulations
+
+### Storage formulation 
+
+Water is stored into pore space of soil. The wetter the soil the less water can be stored. In case of a fully saturated soil only a very limited amount of water (practically zero) can be stored due to some compressability of the materials. Two Storage functions can be used. The first uses the `S.fun` function using a storage coefficient which depends on water table. The assumption here is that the higher the water table, the more saturated the soil already is. The second function is simpler and has a constant storage coefficient.
+
+```{r}
+S.max = 0.25
+S.min = 0.0001
+S.fun = approxfun(x=c(0,2),y=c(S.min,S.max),rule = 2)
+plot(rep(0:200)*0.01,S.fun(rep(0:200)*0.01),xlab = "depth gr.w.table",
+     ylab = "S", main = "storage coefficient vs. gr.w. table")
+grid()
+# storage function using the S.fun
+# storage.fun = function(x,state)
+# {
+#   return(S.fun(ahn2.fun(x)-state)*(old.H.state(x) - state)/delta.t)
+# }
+
+# basic storage function using a constant storage coefficient
+storage.fun = function(x,state)
+{
+  return(S.max*(old.H.state(x) - state)/delta.t)
+}
+```
+
+### KNMI meteorological data
+
+```{r}
+meteo = read.csv(file = "meteo_texel.csv")
+names(meteo) = c("station_code","yearmonthday","RH","EV24")
+#as.character.Date(meteo$Column2)
+meteo$RH = meteo$RH/10000
+meteo$RH[which(meteo$RH < 0)] = 0.0 #to filter the -1 values out of the KNMI data
+meteo$EV24 = meteo$EV24/10000
+plot(meteo$RH,type = "l")
+lines(meteo$EV24,col = "red")
+
+precip_surplus = meteo$RH - meteo$EV24
+plot(precip_surplus,type = "l", main = "Precipitation surplus", xlab = "days" ,ylab = "mm/d")
+abline(h = 0.0, lwd = 3, col= "blue")
+grid()
+
+```
+
+For each time step a new precipitation value (`meteo$RH` ) will be loaded in the `precip` variable as also with the evapotranspiration value (`meteo$EV24` ) which will be loaded into the `evaptrns` .
+
+# Vegetation development
+
+Based on the current depth of the water table competition between different vegetation types and bare soil will develop a new partitioning pattern.
+
+## Procedure for simulating partitioning
+
+Each time step given the previous depth of the water table the actual transpiration $Ta_i$ of the vegetation and actual evaporation $Ea$ of bare soil can be determined. These will be passed to the groundwater model to calculate new heads for the next time step.\
+Based on the actual transpiration and evaporation a new partitioning can be determined
+
+### Application
+
+1.  Setup functions for the vegetation and bare soil fractions; $f_i(x)$
+
+2.  Create new spatial fluxes for the 1D groundwater model
+
+3.  Spatial flux for every vegetation type
+
+    1.  calculate potential transpiration based on current $ET_p(t)$ and vegetation fraction $f_i(x)$
+
+        1.  `Calc.Tpi = function(ETp,fi)`
+
+    2.  calculate $\frac{Ta_i}{Tp_i}$ for this vegetation type
+
+        1.  `Calc.Tai.Tpi = function(Tpi,z,ai,zi)` which returns the fraction (between 0 and 1) $\frac{Ta_i}{Tp_i}$
+
+    3.  return $Ta_i$ to the model as a spatial Cauchy type boundary condition
+
+        1.  `calc.Tai.f1 = function(x,state)` for vegetation type 1
+
+        2.  `add.spatialflux(Tex.veg,rate = calc.Tai.f1, name = "vegetation1")`
+
+4.  Spatial flux for bare soil
+
+    1.  calculate potential evaporation based on $Ep=ET_p - \sum_{i=1}^{n} Tp_i$
+
+    2.  calculate $Ea = \frac{Ep}{1+(\frac{z}{z_E})^{a_E}}$
+
+        1.  `calc.Ea.f0 = function(x,state)`
+
+    3.  return $Ea$ to the model as a spatial Cauchy type boundary condition
+
+        1.  `add.spatialflux(Tex.veg, rate = calc.Ea.f0, name = "soil")`
+
+5.  Run the model with the current vegetation types and bare soil flux
+
+6.  Calculate $( \frac{\Delta f_i}{\Delta t})^{(t+\Delta t)}= (\frac{Ta_i}{Tp_i})^{t+\Delta t}f_i^tf_0^t-d_if_i^t$ for all fractions
+
+    1.  retrieve back $Ta_i$ with `df.ext = dataframe.externalfluxes()`
+
+    2.  calculate $Tp_i(x)$ with current $ET_p(t)$ and vegetation fraction $f_i(x)$
+
+    3.  now one calculate back $\frac{\Delta f_i}{\Delta t}(x)^{(t+\Delta t)}$
+
+7.  Calculate the new vegetation fractions
+
+    1.  $f_i(x)^{t+\Delta t} = f_i(x)^t + \frac{\Delta f_i}{\Delta t}(x)^{(t+\Delta t)}$
+
+8.  Calculate new bare soil fractions
+
+    1.  $f0(x)^{t+\Delta t}=f0(x)^t-\sum_{i=1}^n \frac{\Delta f_i}{{\Delta t}(x)^{(t+\Delta t)}}$
+
+9.  Run the model for the next time step, step 5
+
+$$
+f_i :\text{vegetation type (-)}\\
+z_i : \text{typical water table depth (m)}\\
+a_i : \text{typical shape paramter per veg.type}
+$$
+
+### Vegetation water table related properties
+
+Each specific vegetation is based on the following properties/fraction, here explained for the first vegetation type `f1`:
+
+1.  `f1.ai` : a shape factor of the rooting distribution
+
+2.  `f1.zi` : an optimal water table level for transpiration
+
+3.  `f1.di` : the death rate
+
+4.  `f1` : the current vegetation fraction of `f1` for this location
+
+5.  `f1.start` : the initial vegetation fraction of `f1`
+
+
+### Vegetation development related functions
+
+```{r}
+
+calc.Tai.f1 = function(x,state)
+{
+  f1 = f1.fun(x) 
+  Tpi.f1 <<- Calc.Tpi(evaptrns,f1) 
+ # Tai.Tpi.f1 = Calc.Tai.Tpi(Tpi.f1,max(0,(ahn2.fun(x)-state))*1000,f1.ai,f1.zi)
+   Tai.Tpi.f1 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f1.ai,f1.zi)
+  Tai.f1 = Tai.Tpi.f1 * evaptrns * f1
+  return(-Tai.f1)
+}
+
+
+calc.Tai.f2 = function(x,state)
+{
+  f2 = f2.fun(x)
+  Tpi.f2 <<- Calc.Tpi(evaptrns,f2) 
+  
+  #Tai.Tpi.f2 = Calc.Tai.Tpi(Tpi.f2,max(0,(ahn2.fun(x)-state))*1000,f2.ai,f2.zi)
+  Tai.Tpi.f2 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f2.ai,f2.zi)
+  Tai.f2 = Tai.Tpi.f2 * evaptrns * f2
+  return(-Tai.f2)
+}
+
+calc.Tai.f3 = function(x,state)
+{
+  f3 = f3.fun(x)
+  Tpi.f3  <<- Calc.Tpi(evaptrns,f3)
+  #Tai.Tpi.f3 = Calc.Tai.Tpi(Tpi.f3,max(0,(ahn2.fun(x)-state))*1000,f3.ai,f3.zi)
+  Tai.Tpi.f3 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f3.ai,f3.zi)
+  Tai.f3 = Tai.Tpi.f3 * evaptrns * f3
+  return(-Tai.f3)
+}
+
+calc.Tai.f4 = function(x,state)
+{
+  f4 = f4.fun(x)
+  Tpi.f4  <<- Calc.Tpi(evaptrns,f4) 
+ #  Tai.Tpi.f4 = Calc.Tai.Tpi(Tpi.f4,max(0,(ahn2.fun(x)-state))*1000,f4.ai,f4.zi)
+  Tai.Tpi.f4 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f4.ai,f4.zi)
+  Tai.f4 = Tai.Tpi.f4 * evaptrns * f4
+  return(-Tai.f4)
+}
+
+calc.Tai.f5 = function(x,state)
+{
+  f5 = f5.fun(x)
+  Tpi.f5 <<-  Calc.Tpi(evaptrns,f5) 
+  #  Tai.Tpi.f5 = Calc.Tai.Tpi(Tpi.f5,max(0,(ahn2.fun(x)-state))*1000,f5.ai,f5.zi)
+  Tai.Tpi.f5 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f5.ai,f5.zi)
+  Tai.f5 = Tai.Tpi.f5 * evaptrns * f5
+  return(-Tai.f5)
+}
+
+
+calc.Tai.f6 = function(x,state)
+{
+  f6 = f6.fun(x)
+  Tpi.f6 <<- Calc.Tpi(evaptrns,f6)
+  #  Tai.Tpi.f6 = Calc.Tai.Tpi(Tpi.f6,max(0,(ahn2.fun(x)-state))*1000,f6.ai,f6.zi)
+  Tai.Tpi.f6 = Calc.Tai.Tpi(max(0,(ahn2.fun(x)-state))*1000,f6.ai,f6.zi)
+  Tai.f6 = Tai.Tpi.f6 * evaptrns * f6
+  return(-Tai.f6)
+}
+
+calc.Ea.f0 = function(x,state)
+{
+  #Ep = ETp - sum(Tpi.fi)
+  Ep = evaptrns - (Tpi.f1 + Tpi.f2 + Tpi.f3 + Tpi.f4 + Tpi.f5 + Tpi.f6)
+    Ea =  Ep/(1+max(0,(ahn2.fun(x)-state))*1000/f0.zE)^f0.aE
+  return(-Ea)
+}
+
+```
+
+#### Initializing  the vegetation properties
+
+```{r}
+#vegetation f1
+f1.ai = 1.39
+f1.zi = 250
+f1.di = 0.05
+f1 = 0.7
+f1.start = f1
+#vegetation f2
+f2.ai = 1.87
+f2.zi = 500
+f2.di = 0.01
+f2 = 0.02
+f2.start = f2
+#vegetation f3
+f3.ai = 2.59
+f3.zi = 690
+f3.di = 0.05
+f3 = 0.02
+f3.start = f3
+#vegetation f4
+f4.ai = 3.27
+f4.zi = 1000
+f4.di = 0.05
+f4 = 0.015
+f4.start = f4
+#vegetation f5
+f5.ai = 2.59
+f5.zi = 920
+f5.di = 0.05
+f5 = 0.02
+f5.start = f5
+#vegetation f6
+f6.ai = 4.5
+f6.zi = 1210
+f6.di = 0.05
+f6 = 0.01
+f6.start = f6
+#soil evaporation
+f0.aE = 1.58
+f0.zE = 5.0
+f0 = 0.215
+f0.start = f0
+```
+
+
+
+
+### Transient simulations
+
+```{r}
+
+#set up spatial function for vegetation and bare soil partitioning
+f1 = seq(f1.start,f1.start,length = length(nodes))
+
+#assign a higher partitioning to f6 at the expense of f1 for testing
+#f1[1:10] = 0.2
+f1.fun = approxfun(nodes,f1)
+
+f2 = seq(f2.start,f2.start,length = length(nodes))
+f2.fun = approxfun(nodes,f2)
+
+f3 = seq(f3.start,f3.start,length = length(nodes))
+f3.fun = approxfun(nodes,f3)
+
+f4 = seq(f4.start,f4.start,length = length(nodes))
+f4.fun = approxfun(nodes,f4)
+
+f5 = seq(f5.start,f5.start,length = length(nodes))
+f5.fun = approxfun(nodes,f5)
+
+f6 = seq(f6.start,f6.start, length = length(nodes))
+
+#assign a higher partitioning to f6 (0.5) in the dune area with deeper w.tables
+#f6[1:10] = 0.51 for testing
+f6.fun = approxfun(nodes,f6)
+
+f0 = seq(f0.start,f0.start,length = length(nodes))
+f0.fun = approxfun(nodes,f0)
+
+Ea.f0 = seq(0,0, length = length(nodes))
+Ea.f0.fun = approxfun(nodes, Ea.f0)
+
+
+Tex.veg = copy.model(Tex.stat)
+rem.spatialflux(Tex.veg,"Recharge")
+add.spatialflux(Tex.veg,rate = "precip", name = "Precipitation")
+add.spatialflux(Tex.veg,rate = storage.fun, name = "Storage")
+add.spatialflux(Tex.veg,rate = calc.Tai.f1, name = "vegetation1")
+add.spatialflux(Tex.veg,rate = calc.Tai.f2, name = "vegetation2")
+add.spatialflux(Tex.veg,rate = calc.Tai.f3, name = "vegetation3")
+add.spatialflux(Tex.veg,rate = calc.Tai.f4, name = "vegetation4")
+add.spatialflux(Tex.veg,rate = calc.Tai.f5, name = "vegetation5")
+add.spatialflux(Tex.veg,rate = calc.Tai.f6, name = "vegetation6")
+add.spatialflux(Tex.veg, rate = calc.Ea.f0, name = "soil")
+
+#create an intial head distritbution of the model which is based on the stationary model
+init.H.state = state.fun(Tex.veg)
+old.H.state = init.H.state
+
+begin.date = 20210331 #March 31 2010
+end.date  =  20220330 #365 #length(meteo$yearmonthday)
+begin.day.nr = which(meteo$yearmonthday == begin.date)
+end.day.nr = which(meteo$yearmonthday == end.date)
+current.day = begin.day.nr
+delta.t = 1.0 #day
+do.initialize(model = Tex.veg, init = init.H.state)
+
+#a container to track water balance terms for the whole model and parts of it
+wb = c()# the whole model
+wb.dune = c()# only the dune part i.e. 1350m from north sea
+wb.polder = c()# the polder part starting at 1350 m to the end
+
+#create a matrix alike set for the partitioning
+f0.frac = c()
+f1.frac = c()
+f2.frac = c()
+f3.frac = c()
+f4.frac = c()
+f5.frac = c()
+f6.frac = c()
+
+#create individual vectors for the partitions for use with plotly or other stuff
+f0.set = c()
+f1.set = c()
+f2.set = c()
+f3.set = c()
+f4.set = c()
+f5.set = c()
+f6.set = c()
+date.set = c()
+nodes.set = c()
+wtable.set = c()
+
+#just to keep track of cpu time
+start.run = Sys.time()
+while (current.day < end.day.nr)
+{
+  current.day = current.day + delta.t
+  precip = meteo$RH[current.day]
+  evaptrns = meteo$EV24[current.day]
+  #run the model with the current fluxes
+  solve.steps(Tex.veg)
+  cat(paste("day :",as.Date(as.character(meteo$yearmonthday[current.day]), "%Y%m%d"),
+            "ppt: ",meteo$RH[current.day], "evpot: ",meteo$EV24[current.day],'\n'))
+
+    #saving some intermediate water balance data for the whole model and parts of it
+   wb.df = dataframe.balance(Tex.veg)
+   ##names(wb) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","veg3","veg4","veg5","veg6","soil","precip","bnd")
+   wb = rbind(wb, c(meteo$yearmonthday[current.day],wb.df[2,3],wb.df[3,2],wb.df[3,3],wb.df[4,3],
+                    wb.df[5,3],wb.df[6,3],wb.df[7,3],wb.df[8,3],wb.df[9,3],wb.df[10,3],wb.df[11,2],wb.df[12,4],evaptrns*domain[2]))
+   wb.df = dataframe.balance(Tex.veg,region = c(29:length(nodes)))
+   wb.polder = rbind(wb.polder, c(meteo$yearmonthday[current.day],wb.df[2,3],wb.df[3,2],wb.df[3,3],wb.df[4,3],
+                    wb.df[5,3],wb.df[6,3],wb.df[7,3],wb.df[8,3],wb.df[9,3],wb.df[10,3],wb.df[11,2],wb.df[12,4],evaptrns*domain[2]))
+ wb.df = dataframe.balance(Tex.veg, region = c(1:28))
+ wb.dune = rbind(wb.dune, c(meteo$yearmonthday[current.day],wb.df[2,3],wb.df[3,2],wb.df[3,3],wb.df[4,3],
+                    wb.df[5,3],wb.df[6,3],wb.df[7,3],wb.df[8,3],wb.df[9,3],wb.df[10,3],wb.df[11,2],wb.df[12,4],evaptrns*domain[2]))
+ 
+  #save current external fluxes per node
+  df.external = dataframe.externalfluxes(Tex.veg)
+  #save current state
+  df.states = dataframe.states(Tex.veg)
+  #calculate the water table depth w.r.t. surface
+  wtable = ahn2.fun(nodes)-df.states$state
+    #replace the water tables which are above surface to 0.0 (fully saturated)
+  wtable[which(wtable <0)]=0
+  #create a function from the water table data to be used in e.g. calc.Ea.fo, calc.Tai.fi
+  wtable.fun = approxfun(nodes,wtable)
+  wtable.set = c(wtable.set,wtable) #saving the water table data for some (Gt??) analysis
+  #set up values to calculate the new fractions
+  #fractions vegetation 1
+  Tai.f1 = df.external$vegetation1
+  TaiTpi.f1 = Calc.Tai.Tpi(wtable.fun(nodes),f1.ai,f1.zi)
+  df1.dt = Calc.dfi.dt(TaiTpi.f1,f1,f0,f1.di)
+  f1 = f1.fun(nodes) + df1.dt
+  f1.fun = approxfun(nodes,f1)
+  f1.frac = rbind(f1.frac,f1)
+  f1.set = c(f1.set,f1)
+  #fractions vegetation 2
+  Tai.f2 = df.external$vegetation2
+  TaiTpi.f2 = Calc.Tai.Tpi(wtable.fun(nodes),f2.ai,f2.zi)
+  df2.dt = Calc.dfi.dt(TaiTpi.f2,f2,f0,f2.di)
+  f2 = f2.fun(nodes) + df2.dt
+  f2.fun = approxfun(nodes,f2)
+  f2.frac = rbind(f2.frac,f2)
+  f2.set = c(f2.set,f2)
+  #fractions vegetation 3
+  Tai.f3 = df.external$vegetation3
+  TaiTpi.f3 = Calc.Tai.Tpi(wtable.fun(nodes),f3.ai,f3.zi)
+  df3.dt = Calc.dfi.dt(TaiTpi.f3,f3,f0,f3.di)
+  f3 = f3.fun(nodes) + df3.dt
+  f3.fun = approxfun(nodes,f3)
+  f3.frac = rbind(f3.frac,f3)
+  f3.set = c(f3.set,f3)
+  #fractions vegetation 4
+  Tai.f4 = df.external$vegetation4
+  TaiTpi.f4 = Calc.Tai.Tpi(wtable.fun(nodes),f4.ai,f4.zi)
+  df4.dt = Calc.dfi.dt(TaiTpi.f4,f4,f0,f4.di)
+  f4 = f4.fun(nodes) + df4.dt
+  f4.fun = approxfun(nodes,f4)
+  f4.frac = rbind(f4.frac,f4)
+  f4.set = c(f4.set,f4)
+  #fractions vegetation 5
+  Tai.f5 = df.external$vegetation5
+  TaiTpi.f5 = Calc.Tai.Tpi(wtable.fun(nodes),f5.ai,f5.zi)
+  df5.dt = Calc.dfi.dt(TaiTpi.f5,f5,f0,f5.di)
+  f5 = f5.fun(nodes) + df5.dt
+  f5.fun = approxfun(nodes,f5)
+  f5.frac = rbind(f5.frac,f5)
+  f5.set = c(f5.set,f5)
+ #fractions vegetation 6
+  Tai.f6 = df.external$vegetation6
+  TaiTpi.f6 = Calc.Tai.Tpi(wtable.fun(nodes),f6.ai,f6.zi)
+  df6.dt = Calc.dfi.dt(TaiTpi.f6,f6,f0,f6.di)
+  f6 = f6.fun(nodes) + df6.dt
+  f6.fun = approxfun(nodes,f6)
+  f6.frac = rbind(f6.frac,f6)
+  f6.set = c(f6.set,f6)
+  #fractions bare soil
+  f0 = f0 - df1.dt - df2.dt - df3.dt - df4.dt - df5.dt - df6.dt
+  f0.fun = approxfun(nodes,f0)
+  f0.frac = rbind(f0.frac,f0)
+  f0.set = c(f0.set,f0)
+#  date.set = c(date.set,rep(as.Date(as.character(meteo$yearmonthday[current.day]),"%Y%m%d"),times = length(nodes)))# issues with plot_ly not accepting "2012-11-31"  for sliders/animations
+  date.set = c(date.set,rep(meteo$yearmonthday[current.day],times = length(nodes)))
+  nodes.set = c(nodes.set,nodes)
+#  plot.wtable(Tex.veg)
+  old.H.state = state.fun(Tex.veg)
+}
+stop.run = Sys.time()
+stop.run - start.run
+#creating a data frame for the water balance data
+wb = data.frame(wb)
+#names(wb) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","soil","precip","bnd")
+names(wb) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","veg3","veg4","veg5","veg6","soil","precip","bnd","epot")
+wb.polder = data.frame(wb.polder)
+names(wb.polder) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","veg3","veg4","veg5","veg6","soil","precip","bnd","epot")
+wb.dune = data.frame(wb.dune)
+names(wb.dune) = c("Date","drn","sto2flow","flow2sto","veg1","veg2","veg3","veg4","veg5","veg6","soil","precip","bnd","epot")
+```
+
+### Have a look at different types of results
+
+#### Water budget for the transient model
+
+```{r}
+library(plotly)
+fig.wb = plot_ly(wb, x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~drn,name = "drn", type = "scatter", mode = "lines")
+fig = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~sto2flow,name = "sto2flow", type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~flow2sto,name = "flow2sto", type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~veg1,name = "veg1", type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~veg2,name = "veg2", type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~veg3, name = "veg3", type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~veg4,name = "veg4" , type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~veg5,name = "veg5" , type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~veg6,name = "veg6" , type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~soil,name = "soil" , type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~bnd, name = "boundary",type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~precip,name = "precip" , type = "scatter", mode = "lines")
+fig.wb = add_lines(fig.wb,x = ~as.Date(as.character(wb$Date),"%Y%m%d"), y = ~epot,name = "epot" , type = "scatter", mode = "lines")
+
+fig.wb = layout(fig.wb, title ="Water buget Texel model", xaxis = list(title = "days"),yaxis = list(title = "discharge (m2/d)"), legend = list(title = list(text = "Budget terms")))
+fig.wb
+
+
+
+# library("IJPLOT")
+# 
+# p1 = new_ijplot("wbudget")
+# add_selectnum(ijp = p1,name = "Date", maxnum = length(wb[,1]))
+# add_line(ijp = p1, x=as.Date(as.character(wb$Date), "%Y%m%d"), y=wb$drn)
+# draw(p1)
+```
+
+
+```{r}
+#first create a dataframe with the available data
+
+df.results = data.frame(date.set,nodes.set,f0.set,f1.set,f2.set,f3.set,f4.set,f5.set,f6.set,wtable.set)
+colnames(df.results) = c("Date","Location","F0","F1","F2","F3","F4","F5","F6","wtable")
+
+boxplot(f0.set~nodes.set)
+boxplot(f1.set~nodes.set)
+boxplot(f2.set~nodes.set)
+boxplot(f3.set~nodes.set)
+boxplot(f4.set~nodes.set)
+boxplot(f5.set~nodes.set)
+boxplot(f6.set~nodes.set)
+boxplot(df.results$wtable~df.results$Location)
+
+kleur =rgb(red = 0,green = 0,blue = 1, alpha = 0.1)
+plot(nodes.set,f0.set, pch = 21, col = kleur, bg = kleur)
+hist(f1.set)
+#see how the water table changes in time
+nrdays = end.day.nr - begin.day.nr
+wspiegel = matrix(wtable.set,ncol = nrdays, byrow = F)
+plot(wspiegel[2,])
+```
+
+### Have a look at the data

@@ -1,0 +1,113 @@
+---
+title: "Vegetation functions"
+output: html_notebook
+author: G. Bier September 2023
+---
+  
+# Vegetation shape parameters for transpiration from the groundwater table.
+
+```{r}
+#vegetation f1
+f1.ai = 1.39
+f1.zi = 250
+f1.di = 0.05
+f1 = 0.7
+f1.start = f1
+#vegetation f2
+f2.ai = 1.87
+f2.zi = 500
+f2.di = 0.01
+f2 = 0.02
+f2.start = f2
+#vegetation f3
+f3.ai = 2.59
+f3.zi = 690
+f3.di = 0.05
+f3 = 0.02
+f3.start = f3
+#vegetation f4
+f4.ai = 3.27
+f4.zi = 1000
+f4.di = 0.05
+f4 = 0.015
+f4.start = f4
+#vegetation f5
+f5.ai = 2.59
+f5.zi = 920
+f5.di = 0.05
+f5 = 0.02
+f5.start = f5
+#vegetation f6
+f6.ai = 4.5
+f6.zi = 1210
+f6.di = 0.05
+f6 = 0.01
+f6.start = f6
+#soil evaporation
+f0.aE = 1.58
+f0.zE = 5.0
+f0 = 0.215
+f0.start = f0
+```
+
+
+
+
+
+
+```{r}
+library(IJPLOT)
+
+p = new_ijplot()
+
+wtable.log = seq(log10(50),log10(4000),length.out = 100)
+wtable = 10^(wtable.log)
+
+base.ai= f6.ai
+base.zi =f6.zi
+
+nr.ai = 20
+add_selectnum(p,name = "fi.ai",maxnum = nr.ai)
+nr.zi = 20
+add_selectnum(p, name = "fi.zi",maxnum = nr.zi)
+
+
+Calc.Tai.Tpi = function(z,ai,zi)
+{
+  bi = 4*ai^2/(ai^2-1)*((ai-1)/(ai+1))^(1/ai)
+  Tai.Tpi = bi* (z/zi)^(ai-1)/(1+(z/zi)^ai)^2
+  return(Tai.Tpi)  
+}
+
+
+
+ai.seq = seq(1.1,5, length.out = nr.ai)
+zi.seq = seq(50,4000, length.out = nr.zi)
+
+for(i in 1:nr.ai)
+{
+  for (j in 1:nr.zi)
+  {
+    add_title(p, text = paste("ai :",round(ai.seq[i],3),"zi :",round(zi.seq[j],3)),
+              selectnum = list(c("fi.ai",i),c("fi.zi",j)))
+    add_line(p, x=wtable, 
+             y = Calc.Tai.Tpi(wtable,ai.seq[i],zi.seq[j]),
+             selectnum=list(c("fi.ai",i),c("fi.zi",j)),color = "black",width=2)
+  }
+}
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "blue")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f2.ai,f2.zi),color = "green")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f3.ai,f3.zi),color = "orange")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f4.ai,f4.zi),color = "red")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f5.ai,f5.zi),color = "cyan")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "darkgreen")
+
+draw(p)
+
+
+```
+
+```
+
+
+

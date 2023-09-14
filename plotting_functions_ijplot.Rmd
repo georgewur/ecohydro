@@ -1,0 +1,217 @@
+---
+title: "Vegetation functions"
+output: html_notebook
+author: G. Bier September 2023
+---
+  
+# Vegetation shape parameters for transpiration from the groundwater table.
+
+```{r}
+#vegetation f1
+f1.ai = 1.39
+f1.zi = 250
+f1.di = 0.05
+f1 = 0.7
+f1.start = f1
+#vegetation f2
+f2.ai = 1.87
+f2.zi = 500
+f2.di = 0.01
+f2 = 0.02
+f2.start = f2
+#vegetation f3
+f3.ai = 2.59
+f3.zi = 690
+f3.di = 0.05
+f3 = 0.02
+f3.start = f3
+#vegetation f4
+f4.ai = 3.27
+f4.zi = 1000
+f4.di = 0.05
+f4 = 0.015
+f4.start = f4
+#vegetation f5
+f5.ai = 2.59
+f5.zi = 920
+f5.di = 0.05
+f5 = 0.02
+f5.start = f5
+#vegetation f6
+f6.ai = 4.5
+f6.zi = 1210
+f6.di = 0.05
+f6 = 0.01
+f6.start = f6
+#soil evaporation
+f0.aE = 1.58
+f0.zE = 5.0
+f0 = 0.215
+f0.start = f0
+```
+
+
+
+
+
+
+```{r}
+library(IJPLOT)
+
+p = new_ijplot()
+
+wtable.log = seq(log10(50),log10(4000),length.out = 100)
+wtable = 10^(wtable.log)
+
+base.ai= f6.ai
+base.zi =f6.zi
+
+nr.ai = 20
+add_selectnum(p,name = "fi.ai",maxnum = nr.ai)
+nr.zi = 20
+add_selectnum(p, name = "fi.zi",maxnum = nr.zi)
+
+
+Calc.Tai.Tpi = function(z,ai,zi)
+{
+  bi = 4*ai^2/(ai^2-1)*((ai-1)/(ai+1))^(1/ai)
+  Tai.Tpi = bi* (z/zi)^(ai-1)/(1+(z/zi)^ai)^2
+  return(Tai.Tpi)  
+}
+
+
+
+ai.seq = seq(1.1,5, length.out = nr.ai)
+zi.seq = seq(50,4000, length.out = nr.zi)
+
+for(i in 1:nr.ai)
+{
+  for (j in 1:nr.zi)
+  {
+    add_title(p, text = paste("ai :",round(ai.seq[i],3),"zi :",round(zi.seq[j],3)),
+              selectnum = list(c("fi.ai",i),c("fi.zi",j)))
+    add_line(p, x=wtable, 
+             y = Calc.Tai.Tpi(wtable,ai.seq[i],zi.seq[j]),
+             selectnum=list(c("fi.ai",i),c("fi.zi",j)),color = "black",width=2)
+  }
+}
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "blue")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f2.ai,f2.zi),color = "green")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f3.ai,f3.zi),color = "orange")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f4.ai,f4.zi),color = "red")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f5.ai,f5.zi),color = "cyan")
+    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "darkgreen")
+
+draw(p)
+
+
+```
+
+# Vegetation fraction distributed over Texel in time
+
+```{r}
+frac.p = new_ijplot(fxright = 0.9,rightmargin = 0) #fxright is the fraction of the whole window (1.0)
+
+nr.t.steps = length(f1.frac[,1])
+add_selectnum(frac.p,name = "time step",maxnum = nr.t.steps)
+
+nr.frac = 7
+col.set = rainbow(n=nr.frac)
+
+for (i in 1:nr.t.steps)
+{
+  add_line(frac.p, x= nodes,y = f0.frac[i,],selectnum=c("time step", i), color = col.set[1],width = 2)
+  add_line(frac.p, x= nodes,y = f1.frac[i,],selectnum=c("time step", i), color = col.set[2])
+  add_line(frac.p, x= nodes,y = f2.frac[i,],selectnum=c("time step", i), color = col.set[3])
+  add_line(frac.p, x= nodes,y = f3.frac[i,],selectnum=c("time step", i), color = col.set[4])
+  add_line(frac.p, x= nodes,y = f4.frac[i,],selectnum=c("time step", i), color = col.set[5])
+  add_line(frac.p, x= nodes,y = f5.frac[i,],selectnum=c("time step", i), color = col.set[6])
+  add_line(frac.p, x= nodes,y = f6.frac[i,],selectnum=c("time step", i), color = col.set[7])
+  cur.date = as.Date(as.character(wb$Date[i]), "%Y%m%d")
+  add_title(frac.p,text = paste("Spatial distribution of the vegetation fractions in time :",cur.date),
+            selectnum = list(c("time step",i)),fontsize = 10)
+}
+
+#add_title(frac.p,text = paste("Spatial distribution of the vegetation fractions in time :",wb$Date[i]))
+add_xlabel(frac.p, text = "Distance starting from the North Sea (m)")
+add_ylabel(frac.p, text = "Vegetation fractions (-)")
+
+
+legend = new_ijplot("l",xfixed=TRUE,yfixed=TRUE,fxleft = 0.9,bottommargin=0,leftmargin=0,
+                     horaxisnumdiv = 0, veraxisnumdiv = 0)#, imposedmaxx = nr.frac+1)#, fybottom)
+for (i in 1:nr.frac)
+{
+  add_points(legend,x = 0, y = nr.frac - i,marker = "square",size = 7, fillcolor = col.set[i])
+  add_text(legend, atx= 0, aty = nr.frac - i,text = paste("f",i-1), pos = "E",offset = 5)
+}
+
+
+#draw(legend)
+begin = Sys.time()
+draw(frac.p,legend)
+eind = Sys.time()
+
+print(eind - begin)
+```
+
+# Water balances whole model all time steps
+
+```{r}
+
+wb.p = new_ijplot(fxright = 0.85,rightmargin = 0)
+
+wb.types = names(wb[-1]) # not the first one since it's the date
+
+for (i in 1: length(wb.types))
+{
+  add_selector(wb.p,name=wb.types[i], value = T)
+}
+
+
+days = rep(1:length(wb[,1]))
+first.day = as.Date(as.character(wb$Date[1]),"%Y%m%d")
+last.day = as.Date(as.character(wb$Date[days]),"%Y%m%d")
+
+col.set = rainbow(n=length(wb.types))
+
+for (i in 2: (length(wb.types)+1))
+{
+  add_line(wb.p, x=days,y = wb[,i], color = col.set[i-1],  selector=list(wb.types[i-1]))
+}
+
+add_title(wb.p, text = "Water  balance term in m2/d")
+add_ylabel(wb.p,text = "Flux in m2/d" , fontsize = 12)
+add_xlabel(wb.p,text = paste("Date start",first.day," Date end", last.day),fontsize = 12)
+##creating the legend
+
+legend = new_ijplot("l",xfixed=TRUE,yfixed=TRUE,fxleft = 0.85,bottommargin=0,leftmargin=0,
+                     horaxisnumdiv = 0, veraxisnumdiv = 0, imposedmaxx = length(wb.types)+1)#, fybottom)
+#legend = new_ijplot("l",xfixed=TRUE,yfixed=TRUE,fybottom = 0.5,fxleft = 0.85,bottommargin=0,leftmargin=0,
+#                    imposedminx=0,imposedmaxx=10,imposedminy=-1,imposedmaxy=3,horaxisnumdiv=0,veraxisnumdiv=0)
+#yfrac = 0.9/length(wb.types)
+for (i in 1:length(wb.types))
+{
+  #add_points(legend,x = 1, y = yfrac*(length(wb.types)-i),marker = "square", size = 5, fillcolor = col.set[i])
+#  add_text(legend, atx= 0.05, aty = yfrac*(length(wb.types)-i),offset = 15,text = paste(wb.types[i]) )
+#  add_text(legend, atx= 1, aty = yfrac*(length(wb.types)-i),text = paste(wb.types[i]), pos = "E",offset = 5)
+  
+  add_points(legend,x = 0, y = length(wb.types)-i,marker = "square",size = 7, fillcolor = col.set[i])
+  add_text(legend, atx= 0, aty = length(wb.types)-i,text = paste(wb.types[i]), pos = "E",offset = 5)
+}
+
+
+
+draw(wb.p,legend)
+
+
+
+```
+
+
+
+# Water balance at each node (x-axis) during the simulation(time selector)
+
+```{r}
+
+```
+
