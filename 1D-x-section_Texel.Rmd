@@ -441,6 +441,14 @@ do.initialize(model = Tex.veg, init = init.H.state)
 wb = c()# the whole model
 wb.dune = c()# only the dune part i.e. 1350m from north sea
 wb.polder = c()# the polder part starting at 1350 m to the end
+# also for the nodal external fluxes
+ext.fluxes = names(Tex.veg$sdepspatxflux)
+nr.ext.q = length(ext.fluxes)
+for (i in 1: nr.ext.q)
+{
+  paste("q.",ext.fluxes[i],"= c()")
+}
+
 
 #create a matrix alike set for the partitioning
 f0.frac = c()
@@ -451,17 +459,20 @@ f4.frac = c()
 f5.frac = c()
 f6.frac = c()
 
+#create a matrix alike set for the states
+heads = c()
+
 #create individual vectors for the partitions for use with plotly or other stuff
-f0.set = c()
-f1.set = c()
-f2.set = c()
-f3.set = c()
-f4.set = c()
-f5.set = c()
-f6.set = c()
-date.set = c()
-nodes.set = c()
-wtable.set = c()
+# f0.set = c()
+# f1.set = c()
+# f2.set = c()
+# f3.set = c()
+# f4.set = c()
+# f5.set = c()
+# f6.set = c()
+# date.set = c()
+# nodes.set = c()
+# wtable.set = c()
 
 #just to keep track of cpu time
 start.run = Sys.time()
@@ -489,15 +500,17 @@ while (current.day < end.day.nr)
  
   #save current external fluxes per node
   df.external = dataframe.externalfluxes(Tex.veg)
+  
   #save current state
   df.states = dataframe.states(Tex.veg)
+  heads = rbind(heads,df.states$state)
   #calculate the water table depth w.r.t. surface
   wtable = ahn2.fun(nodes)-df.states$state
     #replace the water tables which are above surface to 0.0 (fully saturated)
   wtable[which(wtable <0)]=0
   #create a function from the water table data to be used in e.g. calc.Ea.fo, calc.Tai.fi
   wtable.fun = approxfun(nodes,wtable)
-  wtable.set = c(wtable.set,wtable) #saving the water table data for some (Gt??) analysis
+  # wtable.set = c(wtable.set,wtable) #saving the water table data for some (Gt??) analysis
   #set up values to calculate the new fractions
   #fractions vegetation 1
   Tai.f1 = df.external$vegetation1
@@ -506,7 +519,7 @@ while (current.day < end.day.nr)
   f1 = f1.fun(nodes) + df1.dt
   f1.fun = approxfun(nodes,f1)
   f1.frac = rbind(f1.frac,f1)
-  f1.set = c(f1.set,f1)
+  #f1.set = c(f1.set,f1) for plotly
   #fractions vegetation 2
   Tai.f2 = df.external$vegetation2
   TaiTpi.f2 = Calc.Tai.Tpi(wtable.fun(nodes),f2.ai,f2.zi)
@@ -514,7 +527,7 @@ while (current.day < end.day.nr)
   f2 = f2.fun(nodes) + df2.dt
   f2.fun = approxfun(nodes,f2)
   f2.frac = rbind(f2.frac,f2)
-  f2.set = c(f2.set,f2)
+  # f2.set = c(f2.set,f2)for plotly
   #fractions vegetation 3
   Tai.f3 = df.external$vegetation3
   TaiTpi.f3 = Calc.Tai.Tpi(wtable.fun(nodes),f3.ai,f3.zi)
@@ -522,7 +535,7 @@ while (current.day < end.day.nr)
   f3 = f3.fun(nodes) + df3.dt
   f3.fun = approxfun(nodes,f3)
   f3.frac = rbind(f3.frac,f3)
-  f3.set = c(f3.set,f3)
+  # f3.set = c(f3.set,f3)for plotly
   #fractions vegetation 4
   Tai.f4 = df.external$vegetation4
   TaiTpi.f4 = Calc.Tai.Tpi(wtable.fun(nodes),f4.ai,f4.zi)
@@ -530,7 +543,7 @@ while (current.day < end.day.nr)
   f4 = f4.fun(nodes) + df4.dt
   f4.fun = approxfun(nodes,f4)
   f4.frac = rbind(f4.frac,f4)
-  f4.set = c(f4.set,f4)
+  # f4.set = c(f4.set,f4)for plotly
   #fractions vegetation 5
   Tai.f5 = df.external$vegetation5
   TaiTpi.f5 = Calc.Tai.Tpi(wtable.fun(nodes),f5.ai,f5.zi)
@@ -538,7 +551,7 @@ while (current.day < end.day.nr)
   f5 = f5.fun(nodes) + df5.dt
   f5.fun = approxfun(nodes,f5)
   f5.frac = rbind(f5.frac,f5)
-  f5.set = c(f5.set,f5)
+  # f5.set = c(f5.set,f5)for plotly
  #fractions vegetation 6
   Tai.f6 = df.external$vegetation6
   TaiTpi.f6 = Calc.Tai.Tpi(wtable.fun(nodes),f6.ai,f6.zi)
@@ -546,15 +559,15 @@ while (current.day < end.day.nr)
   f6 = f6.fun(nodes) + df6.dt
   f6.fun = approxfun(nodes,f6)
   f6.frac = rbind(f6.frac,f6)
-  f6.set = c(f6.set,f6)
+  # f6.set = c(f6.set,f6)for plotly
   #fractions bare soil
   f0 = f0 - df1.dt - df2.dt - df3.dt - df4.dt - df5.dt - df6.dt
   f0.fun = approxfun(nodes,f0)
   f0.frac = rbind(f0.frac,f0)
-  f0.set = c(f0.set,f0)
+  # f0.set = c(f0.set,f0)for plotly
 #  date.set = c(date.set,rep(as.Date(as.character(meteo$yearmonthday[current.day]),"%Y%m%d"),times = length(nodes)))# issues with plot_ly not accepting "2012-11-31"  for sliders/animations
-  date.set = c(date.set,rep(meteo$yearmonthday[current.day],times = length(nodes)))
-  nodes.set = c(nodes.set,nodes)
+  # date.set = c(date.set,rep(meteo$yearmonthday[current.day],times = length(nodes)))for plotly
+  # nodes.set = c(nodes.set,nodes)for plotly
 #  plot.wtable(Tex.veg)
   old.H.state = state.fun(Tex.veg)
 }
