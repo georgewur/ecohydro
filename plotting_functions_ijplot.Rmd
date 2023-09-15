@@ -1,8 +1,17 @@
 ---
 title: "Vegetation functions"
-output: html_notebook
-author: G. Bier September 2023
+author: "G. Bier September 2023"
+output:
+  html_document:
+    df_print: paged
 ---
+  
+### Load data from the model run
+
+```{r}
+load(file = "results20190331_20220401.Rdat")
+```
+
   
 # Vegetation shape parameters for transpiration from the groundwater table.
 
@@ -95,12 +104,15 @@ for(i in 1:nr.ai)
              selectnum=list(c("fi.ai",i),c("fi.zi",j)),color = "black",width=2)
   }
 }
-    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "blue")
-    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f2.ai,f2.zi),color = "green")
-    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f3.ai,f3.zi),color = "orange")
-    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f4.ai,f4.zi),color = "red")
-    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f5.ai,f5.zi),color = "cyan")
-    add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "darkgreen")
+add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "blue")
+add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f2.ai,f2.zi),color = "green")
+add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f3.ai,f3.zi),color = "orange")
+add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f4.ai,f4.zi),color = "red")
+add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f5.ai,f5.zi),color = "cyan")
+add_line(p,x=wtable, y= Calc.Tai.Tpi(wtable,f1.ai,f1.zi),color = "darkgreen")
+
+add_xlabel(p,text = "Depth water table (mm)", fontsize = 14)
+add_ylabel(p, text = "Fraction (-)",fontsize = 14)
 
 draw(p)
 
@@ -133,8 +145,8 @@ for (i in 1:nr.t.steps)
 }
 
 #add_title(frac.p,text = paste("Spatial distribution of the vegetation fractions in time :",wb$Date[i]))
-add_xlabel(frac.p, text = "Distance starting from the North Sea (m)")
-add_ylabel(frac.p, text = "Vegetation fractions (-)")
+add_xlabel(frac.p, text = "Distance starting from the North Sea (m)", fontsize = 14)
+add_ylabel(frac.p, text = "Vegetation fractions (-)", fontsize = 14)
 
 
 legend = new_ijplot("l",xfixed=TRUE,yfixed=TRUE,fxleft = 0.9,bottommargin=0,leftmargin=0,
@@ -180,12 +192,12 @@ for (i in 2: (length(wb.types)+1))
 }
 
 add_title(wb.p, text = "Water  balance term in m2/d")
-add_ylabel(wb.p,text = "Flux in m2/d" , fontsize = 12)
-add_xlabel(wb.p,text = paste("Date start",first.day," Date end", last.day),fontsize = 12)
+add_ylabel(wb.p,text = "Flux in m2/d" , fontsize = 14)
+add_xlabel(wb.p,text = paste("Date start",first.day," Date end", last.day),fontsize = 14)
 ##creating the legend
 
 legend = new_ijplot("l",xfixed=TRUE,yfixed=TRUE,fxleft = 0.85,bottommargin=0,leftmargin=0,
-                     horaxisnumdiv = 0, veraxisnumdiv = 0, imposedmaxx = length(wb.types)+1)#, fybottom)
+                     horaxisnumdiv = 0, veraxisnumdiv = 0, imposedmaxx = max(nchar(wb.types)))#, fybottom)
 #legend = new_ijplot("l",xfixed=TRUE,yfixed=TRUE,fybottom = 0.5,fxleft = 0.85,bottommargin=0,leftmargin=0,
 #                    imposedminx=0,imposedmaxx=10,imposedminy=-1,imposedmaxy=3,horaxisnumdiv=0,veraxisnumdiv=0)
 #yfrac = 0.9/length(wb.types)
@@ -209,9 +221,49 @@ draw(wb.p,legend)
 
 
 
-# Water balance at each node (x-axis) during the simulation(time selector)
+# Flux rates at each node (x-axis) during the simulation(time selector)
 
 ```{r}
+flux.p = new_ijplot(fxright = 0.85, rightmargin = 0)# fxrigth = 0.9 so 0.1 for legend
+nr.t.steps = length(q.Drainage[,1])
 
+add_selectnum(flux.p, name= "Time step",maxnum = nr.t.steps)
+
+q.names = names(Tex.veg$sdepspatxflux)
+nr.ext.q = length(q.names)
+col.set = rainbow(n = nr.ext.q)
+
+for (i in 1:nr.t.steps)
+{
+  add_line(flux.p, x=nodes,y=q.Drainage[i,]*1000,selectnum = c("Time step", i), color = col.set[1])
+  add_line(flux.p, x=nodes,y=q.Storage[i,]*1000,selectnum = c("Time step", i), color = col.set[2])
+  add_line(flux.p, x=nodes,y=q.vegetation1[i,]*1000,selectnum = c("Time step", i), color = col.set[3])
+  add_line(flux.p, x=nodes,y=q.vegetation2[i,]*1000,selectnum = c("Time step", i), color = col.set[4])
+  add_line(flux.p, x=nodes,y=q.vegetation3[i,]*1000,selectnum = c("Time step", i), color = col.set[5])
+  add_line(flux.p, x=nodes,y=q.vegetation4[i,]*1000,selectnum = c("Time step", i), color = col.set[6])
+  add_line(flux.p, x=nodes,y=q.vegetation5[i,]*1000,selectnum = c("Time step", i), color = col.set[7])
+  add_line(flux.p, x=nodes,y=q.vegetation6[i,]*1000,selectnum = c("Time step", i), color = col.set[8])
+  add_line(flux.p, x=nodes,y=q.soil[i,]*1000,selectnum = c("Time step", i), color = col.set[9],dash = c(4,2))
+  cur.date =  as.Date(as.character(wb$Date[i]), "%Y%m%d")
+  add_title(flux.p,text = paste("Spatial distribution external fluxes in time :",cur.date),
+            selectnum = list(c("Time step",i)),fontsize = 12)
+}
+
+add_xlabel(flux.p, text = "Distance starting from the North Sea (m)",fontsize = 14)
+add_ylabel(flux.p, text = "Flux rate (mm/d)", fontsize = 14)
+
+legend = new_ijplot("l",xfixed = T, yfixed = T,fxleft = 0.85,bottommargin = 0, leftmargin = 0,
+                    horaxisnumidv = 0,veraxisnumdiv = 0, imposedmaxx = max(nchar(q.names)))
+for (i in 1:nr.ext.q)
+{
+add_points(legend,x=0,y=nr.ext.q-i,marker = "square",size = 7, fillcolor = col.set[i])
+add_text(legend, atx= 0, aty = nr.ext.q-i,text = q.names[i], pos = "E",offset = 5  )
+  
+}
+
+begin.t = Sys.time()
+draw(flux.p,legend)
+eind.t = Sys.time()
+print(cat("proces time", eind.t - begin.t))
 ```
 
